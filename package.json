@@ -1,0 +1,27 @@
+{
+  "name": "dynawrapper",
+  "version": "0.1.0",
+  "description": "DynamoDB wrapper with Model, Schema and DataType validators",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adelbs/dynawrapper.git"
+  },
+  "keywords": [
+    "DynamoDB",
+    "AWS"
+  ],
+  "author": "Felipe Jacob",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/adelbs/dynawrapper/issues"
+  },
+  "homepage": "https://github.com/adelbs/dynawrapper#readme",
+  "dependencies": {
+    "aws-sdk": "^2.440.0",
+    "uuid": "^3.3.2"
+  }
+}
