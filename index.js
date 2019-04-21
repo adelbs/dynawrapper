@@ -49,9 +49,13 @@ async function initModel(model) {
     }
 }
 
+/**
+ * @param {*} obj 
+ * @param {Schema} schema 
+ */
 function validateSchema(obj, schema) {
     for (let attr in schema) {
-        if (attr != '_id' && attr != '_isSchema') {
+        if (attr.indexOf('_') == -1) {
             //Checking if it is a list and if the values of the list matches with the schema list type
             if (obj[attr] && obj[attr].push && schema[attr].push && !validateType(schema[attr][0], obj[attr][0]))
                 throw new Error(`Invalid data type list: the Object value does not match with the schema: field "${attr}"`);
@@ -91,6 +95,34 @@ function validateSchema(obj, schema) {
     }
 }
 
+/**
+ * @param {*} obj 
+ * @param {Schema} schema 
+ */
+function getObjToSave(obj, schema, isSubdocument = false) {
+    let retObj = { };
+
+    if (!obj._id) {
+        retObj._id = uuid();
+        if (!isSubdocument) retObj._isNew = true;
+    }
+    else {
+        retObj._id = obj._id;
+        if (!isSubdocument) retObj._isNew = false;
+    }
+
+    for (let attr in obj) {
+        if (schema[attr] && schema[attr].toDBValue)
+            retObj[attr] = schema[attr].toDBValue(obj[attr]);
+        else if (schema[attr] && schema[attr]._isSchema)
+            retObj[attr] = getObjToSave(obj[attr], schema[attr], true);
+        else if (schema[attr] || (!schema[attr] && !schema._blocked))
+            retObj[attr] = obj[attr];
+    }
+
+    return retObj;
+}
+
 function Schema(obj, blocked = false) {
     for (let attr in obj) {
         this[attr] = obj[attr];
@@ -118,44 +150,39 @@ function model(tableName, schema) {
         this.save = async function () {
             await initModel(this);
 
-            let params = {
-                TableName: tableName,
-                Item: obj
-            };
+            let awsRequest;
+            let params = { TableName: tableName };
 
             //Validating the fields
             validateSchema(obj, schema);
 
-            let awsRequest;
-            let result;
+            //Preparing the obj to save
+            params.Item = getObjToSave(obj, schema);
 
-            //If there is no _id, then it means it is a new data
-            if (obj._id) {
-                params.Key = { _id: obj._id };
+            if (params.Item._isNew) {
+                params.Item._isNew = undefined;
+                awsRequest = await docClient.put(params);
+                await awsRequest.promise();
+            }
+            else {
+                params.Key = { _id: params.Item._id };
                 params.UpdateExpression = 'set ';
                 params.ExpressionAttributeValues = {};
 
-                for (let attr in obj) {
+                for (let attr in params.Item) {
                     if (attr != '_id') {
                         params.UpdateExpression += `${attr} = :${attr}, `;
-                        params.ExpressionAttributeValues[`:${attr}`] = obj[attr];
+                        params.ExpressionAttributeValues[`:${attr}`] = params.Item[attr];
                     }
                 }
 
                 params.UpdateExpression = params.UpdateExpression.substring(0, params.UpdateExpression.length - 2);
 
                 awsRequest = await docClient.update(params);
-                result = await awsRequest.promise();
-                result = obj;
-            }
-            else {
-                obj._id = uuid();
-                awsRequest = await docClient.put(params);
-                result = await awsRequest.promise();
-                result = obj;
+                await awsRequest.promise();
             }
 
-            return result;
+            return params.Item;
         };
 
         this.delete = async function () {
