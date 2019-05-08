@@ -4,7 +4,7 @@ const AWS = require('aws-sdk');
 const uuid = require('uuid/v1');
 
 const config = require('./config');
-const { validateType, types } = require('./data-types');
+const { validateType } = require('./data-types');
 
 AWS.config.update({ region: config.awsRegion });
 const docClient = new AWS.DynamoDB.DocumentClient();
@@ -56,13 +56,14 @@ async function initModel(model) {
 function validateSchema(obj, schema) {
     for (let attr in schema) {
         if (attr.indexOf('_') == -1) {
+
             //Checking if it is a list and if the values of the list matches with the schema list type
             if (obj[attr] && obj[attr].push && schema[attr].push && !validateType(schema[attr][0], obj[attr][0]))
                 throw new Error(`Invalid data type list: the Object value does not match with the schema: field "${attr}"`);
 
             //Checking the required fields and default values
-            if (!obj[attr] && schema[attr].required) {
-                if (schema[attr].default)
+            if (!obj[attr] && schema[attr].required && obj[attr] != 0) {
+                if (schema[attr].default || schema[attr].default == 0)
                     obj[attr] = schema[attr].default;
                 else
                     throw new Error(`The field "${attr}" is required`);
@@ -89,7 +90,7 @@ function validateSchema(obj, schema) {
             //If it's a sub-document, validates its schema also
             if (obj[attr] && schema[attr]._isSchema)
                 validateSchema(obj[attr], schema[attr]);
-            else if (obj[attr] && schema[attr].type && schema[attr].type._isSchema) 
+            else if (obj[attr] && schema[attr].type && schema[attr].type._isSchema)
                 validateSchema(obj[attr], schema[attr].type);
         }
     }
@@ -100,7 +101,7 @@ function validateSchema(obj, schema) {
  * @param {Schema} schema 
  */
 function getObjToSave(obj, schema, isSubdocument = false) {
-    let retObj = { };
+    let retObj = {};
 
     if (!obj._id) {
         retObj._id = uuid();
@@ -114,8 +115,49 @@ function getObjToSave(obj, schema, isSubdocument = false) {
     for (let attr in obj) {
         if (schema[attr] && schema[attr].toDBValue)
             retObj[attr] = schema[attr].toDBValue(obj[attr]);
+        else if (schema[attr] && schema[attr].type && schema[attr].type.toDBValue)
+            retObj[attr] = schema[attr].type.toDBValue(obj[attr]);
         else if (schema[attr] && schema[attr]._isSchema)
             retObj[attr] = getObjToSave(obj[attr], schema[attr], true);
+        else if (schema[attr] && schema[attr].type && schema[attr].type._isSchema)
+            retObj[attr] = getObjToSave(obj[attr], schema[attr].type, true);
+        else if (schema[attr] && schema[attr].push && schema[attr][0]._isSchema) {
+            retObj[attr] = [];
+            for (let i = 0; i < obj[attr].length; i++) {
+                retObj[attr][i] = getObjToSave(obj[attr][i], schema[attr][0], true);
+            }
+        }
+        else if (schema[attr] || (!schema[attr] && !schema._blocked))
+            retObj[attr] = obj[attr];
+    }
+
+    return retObj;
+}
+
+/**
+ * @param {*} obj 
+ * @param {Schema} schema 
+ */
+function getSavedObj(obj, schema) {
+    let retObj = {};
+
+    if (obj._id) retObj._id = obj._id;
+
+    for (let attr in obj) {
+        if (schema[attr] && schema[attr].toObjValue)
+            retObj[attr] = schema[attr].toObjValue(obj[attr]);
+        else if (schema[attr] && schema[attr].type && schema[attr].type.toObjValue)
+            retObj[attr] = schema[attr].type.toObjValue(obj[attr]);
+        else if (schema[attr] && schema[attr]._isSchema)
+            retObj[attr] = getSavedObj(obj[attr], schema[attr]);
+        else if (schema[attr] && schema[attr].type && schema[attr].type._isSchema)
+            retObj[attr] = getSavedObj(obj[attr], schema[attr].type);
+        else if (schema[attr] && schema[attr].push && schema[attr][0]._isSchema) {
+            retObj[attr] = [];
+            for (let i = 0; i < obj[attr].length; i++) {
+                retObj[attr][i] = getSavedObj(obj[attr][i], schema[attr][0]);
+            }
+        }
         else if (schema[attr] || (!schema[attr] && !schema._blocked))
             retObj[attr] = obj[attr];
     }
@@ -134,15 +176,39 @@ function Schema(obj, blocked = false) {
 
 /**
  * @param {String} tableName 
- * @param {Schema} schema 
+ * @param {Schema} objSchema 
  */
-function model(tableName, schema) {
+function model(tableName, objSchema) {
 
     /**
-     * @param {*} obj 
+     * @param {objSchema} obj 
      */
-    let Model = function (obj) {
+    let Model = function (obj = objSchema) {
         this.tableName = tableName;
+        this.schema = objSchema;
+
+        let tmpObj = getSavedObj(obj, objSchema);
+        for (let attr in tmpObj) this[attr] = tmpObj[attr];
+
+        /**
+         * Load the obj according to the _id
+         */
+        this.load = async function () {
+            await initModel(this);
+
+            let tmpObj = await scan(this, {
+                FilterExpression: '#id = :id',
+                ExpressionAttributeNames: { '#id': '_id' },
+                ExpressionAttributeValues: { ':id': this._id }
+            });
+
+            delete this['_id'];
+
+            if (tmpObj) {
+                tmpObj = getSavedObj(tmpObj[0], objSchema);
+                for (let attr in tmpObj) this[attr] = tmpObj[attr];
+            }
+        };
 
         /**
          * Creates or Updates an Item (depending on the _id)
@@ -154,24 +220,27 @@ function model(tableName, schema) {
             let params = { TableName: tableName };
 
             //Validating the fields
-            validateSchema(obj, schema);
+            validateSchema(this, objSchema);
 
             //Preparing the obj to save
-            params.Item = getObjToSave(obj, schema);
+            params.Item = getObjToSave(this, objSchema);
 
             if (params.Item._isNew) {
-                params.Item._isNew = undefined;
+                delete params.Item._isNew;
                 awsRequest = await docClient.put(params);
                 await awsRequest.promise();
             }
             else {
+                delete params.Item._isNew;
                 params.Key = { _id: params.Item._id };
                 params.UpdateExpression = 'set ';
+                params.ExpressionAttributeNames = {};
                 params.ExpressionAttributeValues = {};
 
                 for (let attr in params.Item) {
                     if (attr != '_id') {
-                        params.UpdateExpression += `${attr} = :${attr}, `;
+                        params.UpdateExpression += `#${attr} = :${attr}, `;
+                        params.ExpressionAttributeNames[`#${attr}`] = attr;
                         params.ExpressionAttributeValues[`:${attr}`] = params.Item[attr];
                     }
                 }
@@ -182,42 +251,113 @@ function model(tableName, schema) {
                 await awsRequest.promise();
             }
 
+            this._id = params.Item._id;
             return params.Item;
         };
 
+        this.push = async function () {
+            // const params = {
+            //     TableName: "top-ten",
+            //     Key: {
+            //         "UserId": 'abc123',
+            //     },
+            // UpdateExpression : "SET #attrName = list_append(#attrName, :attrValue)",
+            // ExpressionAttributeNames : {
+            //   "#attrName" : "Lists"
+            // },
+            // ExpressionAttributeValues : {
+            //   ":attrValue" : [{
+            //             "id": 2,
+            //             "title": "Favorite TV Shows",
+            //             "topMovies": [{"id": 1, "title" : "The Simpsons"}]
+            
+            //         }]
+            // },
+            // ReturnValues: "UPDATED_NEW"
+            // };
+        };
+
         this.delete = async function () {
+            await initModel(this);
+
             let params = {
                 TableName: tableName,
-                Key: { '_id': obj._id }
+                Key: { '_id': this._id }
             };
 
             const awsRequest = await docClient.delete(params);
             const result = await awsRequest.promise();
+
+            for (let attr in this) delete this[attr];
+
             return result;
         };
-    };
 
-    /**
-     * Performs a scan at the DynamoDB table
-     * @param {*} query 
-     */
-    Model.find = async function (query) {
-        let params = {
-            TableName: tableName
+        /**
+         * Return a printable object without the Model and Schemas function
+         */
+        this.printObj = function () {
+            let newObj = this;
+            delete newObj['initialized'];
+            delete newObj['load'];
+            delete newObj['save'];
+            delete newObj['delete'];
+            delete newObj['tableName'];
+            delete newObj['schema'];
+            delete newObj['toString'];
+
+            let returnObj = JSON.stringify(newObj);
+
+            return JSON.parse(returnObj);
         };
 
-        params.FilterExpression = query.FilterExpression;
-        params.ExpressionAttributeValues = query.ExpressionAttributeValues;
-
-        const awsRequest = await docClient.scan(params);
-        const result = await awsRequest.promise();
-
-        return result.Items;
     };
 
     return Model;
 }
 
-module.exports.types = types;
+/**
+* Performs a scan at the DynamoDB table
+* @param {Model} model
+* @param { {ProjectionExpression: '', FilterExpression: '', ExpressionAttributeNames: { }, ExpressionAttributeValues: { }} } query 
+*/
+async function scan(model, query) {
+
+    let params = {
+        TableName: model.tableName
+    };
+
+    params.FilterExpression = query.FilterExpression;
+    params.ExpressionAttributeNames = query.ExpressionAttributeNames;
+    params.ExpressionAttributeValues = query.ExpressionAttributeValues;
+
+    if (query.ProjectionExpression) {
+        params.ProjectionExpression = query.ProjectionExpression;
+    }
+    else {
+        if (!params.ExpressionAttributeNames)
+            params.ExpressionAttributeNames = { };
+
+        params.ProjectionExpression = '#_id, ';
+        params.ExpressionAttributeNames['#_id'] = '_id';
+
+        for (let attr in model.schema) {
+            // if (!model.schema[attr].push) {
+                params.ProjectionExpression += `#${attr}, `;
+                params.ExpressionAttributeNames[`#${attr}`] = attr;
+            // }
+        }
+
+        params.ProjectionExpression = params.ProjectionExpression.substring(0, params.ProjectionExpression.length - 2);
+    }
+
+    const awsRequest = await docClient.scan(params);
+    let result = await awsRequest.promise();
+    result = result.Items;
+
+    return result;
+}
+
+module.exports.scan = scan;
 module.exports.model = model;
 module.exports.Schema = Schema;

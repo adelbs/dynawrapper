@@ -48,7 +48,7 @@ const typePassword = new DataType(
     },
     //To Obj Value
     value => { 
-        // value = { pwd: 'pwdToOpen', value: 'valueFromDB' }
+        // value = { key: 'pwdToOpen', value: 'valueFromDB' }
         let result = '';
         try {
             let a = value.value.split('#|!')[0];

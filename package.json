@@ -1,6 +1,6 @@
 {
   "name": "dynawrapper",
-  "version": "0.1.1",
+  "version": "0.1.9",
   "description": "DynamoDB wrapper with Model, Schema and DataType validators",
   "main": "index.js",
   "scripts": {
@@ -21,8 +21,10 @@
   },
   "homepage": "https://github.com/adelbs/dynawrapper#readme",
   "dependencies": {
-    "aws-sdk": "^2.440.0",
     "sjcl": "^1.0.8",
     "uuid": "^3.3.2"
+  },
+  "devDependencies": {
+    "aws-sdk": "^2.443.0"
   }
 }
