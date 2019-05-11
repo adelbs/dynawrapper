@@ -1,6 +1,4 @@
-const encrypt = require('sjcl');
-
-const { Schema, model, types } = require('./index');
+const { Schema, model, types, Transaction } = require('./index');
 
 const testSubSchema = new Schema({
     name: types.requiredString,
@@ -24,9 +22,10 @@ const testSchema = new Schema({
     balance: types.requiredNumber
 }, true);
 
-const Test = model('TestTable', testSchema);
+const Test1 = model('TestTable1', testSchema);
+const Test2 = model('TestTable2', testSchema);
 
-const test = new Test({
+const test1 = new Test1({
     name: 'Test 01',
     address: 'address',
     email: 'myemail@testemail.com',
@@ -43,21 +42,31 @@ const test = new Test({
     balance: 0.0
 });
 
-// console.log('123.123/123-123'.replace(/[^\d]+/g,''));
+const test2 = new Test2({
+    name: 'Test 02',
+    address: 'address',
+    email: 'myemail@testemail.com',
+    cpf: '528.948.220-22',
+    password: 'testPWS123',
+    dt: new Date(),
+    subField: [{
+        name: 'subfieldname',
+        email: 'test@email.com',
+        inex: 'inex',
+        password: 'senha'
+    }],
+    inex: 'inex',
+    balance: 0.0
+});
 
 async function doTest() {
 
-    let obj = encrypt.encrypt('123456', 'felipe');
+    const tr = new Transaction();
 
-    // let valor = encrypt.decrypt('chave', '{"iv":"LEtq4YkxIOIj5kLxzWGyVw==","v":1,"iter":10000,"ks":128,"ts":64,"mode":"ccm","adata":"","cipher":"aes","salt":"gjsgNfqHIuM=","ct":"zmEZL5gHLbm86E+0hJg="}');
+    await test1.save(tr);
+    await test2.save(tr);
 
-
-    console.log(obj);
+    await tr.run();
 }
 
 doTest();
-
-// console.log(crypt.encrypt('felipe', 'felipe'));
-
-// console.log(types.password.toDBValue('Felipe'));
-// console.log(types.password.toObjValue({value: 'giK7kPmZiG5pzwNgeZ3n0Q==#|!kkzLxMXAVEg=@|?hixzbfGrcCW7DDF/SZU=', key: 'Felipe'}));

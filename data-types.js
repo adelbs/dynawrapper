@@ -15,11 +15,15 @@ function validateType(schemaField, fieldValue) {
 
 /**
  * @param {function(value)} validate 
+ * @param {function(value)} toDBValue 
+ * 
+ * New Obj means this is a new Object and the value is not comming from the database
+ * @param {function(value, newObj)} toObjValue 
  */
 const DataType = function (validate, toDBValue, toObjValue) {
     this.validate = function (value) { return validate(value); };
     this.toDBValue = function (value) { return toDBValue(value); };
-    this.toObjValue = function (value) { return toObjValue(value); };
+    this.toObjValue = function (value, newObj) { return toObjValue(value, newObj); };
 }
 
 const typeEmail = new DataType(
@@ -47,29 +51,34 @@ const typePassword = new DataType(
         return pwd;
     },
     //To Obj Value
-    value => { 
+    (value, newObj) => {
         // value = { key: 'pwdToOpen', value: 'valueFromDB' }
         let result = '';
-        try {
-            let a = value.value.split('#|!')[0];
-            let b = value.value.split('#|!')[1].split('@|?')[0];
-            let c = value.value.split('#|!')[1].split('@|?')[1];
-            let pwd = {
-                iv: a,
-                iter: 10000,
-                ks: 128,
-                ts: 64,
-                mode: 'ccm',
-                adata: '',
-                cipher: 'aes',
-                salt: b,
-                ct: c
-            };
 
-            result = crypt.decrypt(value.key + DEFAULT_CRYPTO_KEY, JSON.stringify(pwd));
+        if (newObj) result = value;
+        else {
+
+            try {
+                let a = value.value.split('#|!')[0];
+                let b = value.value.split('#|!')[1].split('@|?')[0];
+                let c = value.value.split('#|!')[1].split('@|?')[1];
+                let pwd = {
+                    iv: a,
+                    iter: 10000,
+                    ks: 128,
+                    ts: 64,
+                    mode: 'ccm',
+                    adata: '',
+                    cipher: 'aes',
+                    salt: b,
+                    ct: c
+                };
+
+                result = crypt.decrypt(value.key + DEFAULT_CRYPTO_KEY, JSON.stringify(pwd));
+            }
+            catch (err) { result = null; }
         }
-        catch (err) { result = null; }
-
+        
         return result;
     }
 );

@@ -4,7 +4,7 @@ const AWS = require('aws-sdk');
 const uuid = require('uuid/v1');
 
 const config = require('./config');
-const { validateType } = require('./data-types');
+const dataTypes = require('./data-types');
 
 AWS.config.update({ region: config.awsRegion });
 const docClient = new AWS.DynamoDB.DocumentClient();
@@ -58,7 +58,7 @@ function validateSchema(obj, schema) {
         if (attr.indexOf('_') == -1) {
 
             //Checking if it is a list and if the values of the list matches with the schema list type
-            if (obj[attr] && obj[attr].push && schema[attr].push && !validateType(schema[attr][0], obj[attr][0]))
+            if (obj[attr] && obj[attr].push && schema[attr].push && !dataTypes.validateType(schema[attr][0], obj[attr][0]))
                 throw new Error(`Invalid data type list: the Object value does not match with the schema: field "${attr}"`);
 
             //Checking the required fields and default values
@@ -70,7 +70,7 @@ function validateSchema(obj, schema) {
             }
 
             //Checking the types
-            if (obj[attr] && !validateType(schema[attr], obj[attr]))
+            if (obj[attr] && !dataTypes.validateType(schema[attr], obj[attr]))
                 throw new Error(`Invalid data type: the Object value does not match with the schema: field "${attr}"`);
 
             //If it's an enum, validate the value
@@ -137,25 +137,26 @@ function getObjToSave(obj, schema, isSubdocument = false) {
 /**
  * @param {*} obj 
  * @param {Schema} schema 
+ * @param {boolean} newObj means it is a new object and the value is not comming from the db 
  */
-function getSavedObj(obj, schema) {
+function getSavedObj(obj, schema, newObj) {
     let retObj = {};
 
     if (obj._id) retObj._id = obj._id;
 
     for (let attr in obj) {
         if (schema[attr] && schema[attr].toObjValue)
-            retObj[attr] = schema[attr].toObjValue(obj[attr]);
+            retObj[attr] = schema[attr].toObjValue(obj[attr], newObj);
         else if (schema[attr] && schema[attr].type && schema[attr].type.toObjValue)
-            retObj[attr] = schema[attr].type.toObjValue(obj[attr]);
+            retObj[attr] = schema[attr].type.toObjValue(obj[attr], newObj);
         else if (schema[attr] && schema[attr]._isSchema)
-            retObj[attr] = getSavedObj(obj[attr], schema[attr]);
+            retObj[attr] = getSavedObj(obj[attr], schema[attr], newObj);
         else if (schema[attr] && schema[attr].type && schema[attr].type._isSchema)
-            retObj[attr] = getSavedObj(obj[attr], schema[attr].type);
+            retObj[attr] = getSavedObj(obj[attr], schema[attr].type, newObj);
         else if (schema[attr] && schema[attr].push && schema[attr][0]._isSchema) {
             retObj[attr] = [];
             for (let i = 0; i < obj[attr].length; i++) {
-                retObj[attr][i] = getSavedObj(obj[attr][i], schema[attr][0]);
+                retObj[attr][i] = getSavedObj(obj[attr][i], schema[attr][0], newObj);
             }
         }
         else if (schema[attr] || (!schema[attr] && !schema._blocked))
@@ -187,7 +188,7 @@ function model(tableName, objSchema) {
         this.tableName = tableName;
         this.schema = objSchema;
 
-        let tmpObj = getSavedObj(obj, objSchema);
+        let tmpObj = getSavedObj(obj, objSchema, true);
         for (let attr in tmpObj) this[attr] = tmpObj[attr];
 
         /**
@@ -212,8 +213,9 @@ function model(tableName, objSchema) {
 
         /**
          * Creates or Updates an Item (depending on the _id)
+         * @param {Transaction} tr
          */
-        this.save = async function () {
+        this.save = async function (tr) {
             await initModel(this);
 
             let awsRequest;
@@ -227,8 +229,11 @@ function model(tableName, objSchema) {
 
             if (params.Item._isNew) {
                 delete params.Item._isNew;
-                awsRequest = await docClient.put(params);
-                await awsRequest.promise();
+                if (tr) tr.put(params);
+                else {
+                    awsRequest = await docClient.put(params);
+                    await awsRequest.promise();
+                }
             }
             else {
                 delete params.Item._isNew;
@@ -247,15 +252,22 @@ function model(tableName, objSchema) {
 
                 params.UpdateExpression = params.UpdateExpression.substring(0, params.UpdateExpression.length - 2);
 
-                awsRequest = await docClient.update(params);
-                await awsRequest.promise();
+                if (tr) tr.update(params);
+                else {
+                    awsRequest = await docClient.update(params);
+                    await awsRequest.promise();
+                }
             }
 
             this._id = params.Item._id;
             return params.Item;
         };
 
-        this.push = async function () {
+        /**
+        * (TODO) Merge a subdocument array Item
+        * @param {Transaction} tr
+        */
+        this.push = async function (tr) {
             // const params = {
             //     TableName: "top-ten",
             //     Key: {
@@ -270,14 +282,18 @@ function model(tableName, objSchema) {
             //             "id": 2,
             //             "title": "Favorite TV Shows",
             //             "topMovies": [{"id": 1, "title" : "The Simpsons"}]
-            
+
             //         }]
             // },
             // ReturnValues: "UPDATED_NEW"
             // };
         };
 
-        this.delete = async function () {
+        /**
+        * Deletes an Item (depending on the _id)
+        * @param {Transaction} tr
+        */
+        this.delete = async function (tr) {
             await initModel(this);
 
             let params = {
@@ -285,8 +301,11 @@ function model(tableName, objSchema) {
                 Key: { '_id': this._id }
             };
 
-            const awsRequest = await docClient.delete(params);
-            const result = await awsRequest.promise();
+            if (tr) tr.delete(params);
+            else {
+                const awsRequest = await docClient.delete(params);
+                const result = await awsRequest.promise();    
+            }
 
             for (let attr in this) delete this[attr];
 
@@ -336,15 +355,15 @@ async function scan(model, query) {
     }
     else {
         if (!params.ExpressionAttributeNames)
-            params.ExpressionAttributeNames = { };
+            params.ExpressionAttributeNames = {};
 
         params.ProjectionExpression = '#_id, ';
         params.ExpressionAttributeNames['#_id'] = '_id';
 
         for (let attr in model.schema) {
             // if (!model.schema[attr].push) {
-                params.ProjectionExpression += `#${attr}, `;
-                params.ExpressionAttributeNames[`#${attr}`] = attr;
+            params.ProjectionExpression += `#${attr}, `;
+            params.ExpressionAttributeNames[`#${attr}`] = attr;
             // }
         }
 
@@ -358,6 +377,20 @@ async function scan(model, query) {
     return result;
 }
 
+function Transaction() {
+    const transactItems = [];
+
+    this.put = (item) => transactItems.push({ Put: item });
+    this.update = () => transactItems.push({ Update: item });
+    this.delete = () => transactItems.push({ Delete: item });
+
+    this.run = async () => {
+        return await docClient.transactWrite({ TransactItems: transactItems }).promise();
+    };
+}
+
+module.exports.types = dataTypes.types;
 module.exports.scan = scan;
 module.exports.model = model;
 module.exports.Schema = Schema;
+module.exports.Transaction = Transaction;
