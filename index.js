@@ -212,6 +212,13 @@ function model(tableName, objSchema) {
         };
 
         /**
+         * Just validate the fields
+         */
+        this.validate = function () {
+            validateSchema(this, objSchema);
+        }
+
+        /**
          * Creates or Updates an Item (depending on the _id)
          * @param {Transaction} tr
          */
