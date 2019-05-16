@@ -11,6 +11,7 @@ const testSubSchema = new Schema({
 const testSchema = new Schema({
     name: types.requiredString,
     address: String,
+    idTest1: String,
     email: types.email,
     cpf: {
         type: types.cpf,
@@ -44,6 +45,7 @@ const test1 = new Test1({
 
 const test2 = new Test2({
     name: 'Test 02',
+    idTest1: '',
     address: 'address',
     email: 'myemail@testemail.com',
     cpf: '528.948.220-22',
@@ -64,9 +66,13 @@ async function doTest() {
     const tr = new Transaction();
 
     await test1.save(tr);
+
+    test2.idTest1 = test1._id;
     await test2.save(tr);
 
-    await tr.run();
+
+    tr.run();
+
 }
 
 doTest();

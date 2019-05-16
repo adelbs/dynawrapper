@@ -1,6 +1,6 @@
 {
   "name": "dynawrapper",
-  "version": "0.1.12",
+  "version": "0.1.15",
   "description": "DynamoDB wrapper with Model, Schema and DataType validators",
   "main": "index.js",
   "scripts": {

@@ -140,9 +140,9 @@ const typeCNPJ = new DataType(
                 isValid = false;
             else {
                 // Valida DVs
-                let size = cnpj.length - 2
-                let numbers = cnpj.substring(0, size);
-                let digits = cnpj.substring(size);
+                let size = value.length - 2
+                let numbers = value.substring(0, size);
+                let digits = value.substring(size);
                 let sum = 0;
                 let pos = size - 7;
                 for (i = size; i >= 1; i--) {
@@ -154,7 +154,7 @@ const typeCNPJ = new DataType(
                 if (result != digits.charAt(0)) isValid = false;
                 else {
                     size = size + 1;
-                    numbers = cnpj.substring(0, size);
+                    numbers = value.substring(0, size);
                     sum = 0;
                     pos = size - 7;
                     for (i = size; i >= 1; i--) {

@@ -57,6 +57,10 @@ function validateSchema(obj, schema) {
     for (let attr in schema) {
         if (attr.indexOf('_') == -1) {
 
+            //Removing empty values before the validation starts
+            if (obj[attr] == '')
+                delete obj[attr];
+
             //Checking if it is a list and if the values of the list matches with the schema list type
             if (obj[attr] && obj[attr].push && schema[attr].push && !dataTypes.validateType(schema[attr][0], obj[attr][0]))
                 throw new Error(`Invalid data type list: the Object value does not match with the schema: field "${attr}"`);
@@ -303,6 +307,7 @@ function model(tableName, objSchema) {
         this.delete = async function (tr) {
             await initModel(this);
 
+            let result;
             let params = {
                 TableName: tableName,
                 Key: { '_id': this._id }
@@ -311,7 +316,7 @@ function model(tableName, objSchema) {
             if (tr) tr.delete(params);
             else {
                 const awsRequest = await docClient.delete(params);
-                const result = await awsRequest.promise();    
+                result = await awsRequest.promise();    
             }
 
             for (let attr in this) delete this[attr];
