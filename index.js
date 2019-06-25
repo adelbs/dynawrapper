@@ -350,7 +350,7 @@ function model(tableName, objSchema) {
 /**
 * Performs a scan at the DynamoDB table
 * @param {Model} model
-* @param { {ProjectionExpression: '', FilterExpression: '', ExpressionAttributeNames: { }, ExpressionAttributeValues: { }} } query 
+* @param { {ProjectionExpression: '', FilterExpression: '', ExpressionAttributeNames: { }, ExpressionAttributeValues: { }, Limit: ''} } query 
 */
 async function scan(model, query) {
 
@@ -362,6 +362,9 @@ async function scan(model, query) {
     params.ExpressionAttributeNames = query.ExpressionAttributeNames;
     params.ExpressionAttributeValues = query.ExpressionAttributeValues;
 
+    if (query.Limit) 
+        params.Limit = query.Limit;
+    
     if (query.ProjectionExpression) {
         params.ProjectionExpression = query.ProjectionExpression;
     }
